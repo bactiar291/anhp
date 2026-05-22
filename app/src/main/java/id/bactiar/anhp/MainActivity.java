@@ -53,6 +53,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         refreshStatus();
+        if (canDrawOverlay()) MacroOverlayService.startAction(this, MacroOverlayService.ACTION_SHOW_CONTROLS);
     }
 
     @Override
@@ -101,6 +102,23 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams statusLp = matchWrap();
         statusLp.topMargin = dp(12);
         root.addView(status, statusLp);
+
+        TextView guide = new TextView(this);
+        guide.setText(
+                "Cara cepat:\n" +
+                "1. Izinkan Accessibility + Overlay.\n" +
+                "2. Tekan Show A/P sampai panel mengambang muncul.\n" +
+                "3. Tekan A: mulai rekam. Panel jadi merah.\n" +
+                "4. Tap/swipe target seperti biasa. Tap dikirim ke app bawah.\n" +
+                "5. Tekan STOP/A: simpan rekaman.\n" +
+                "6. Tekan P: replay. Panel jadi biru. Tekan STOP/P untuk berhenti.");
+        guide.setTextColor(0xFF111827);
+        guide.setTextSize(14);
+        guide.setPadding(dp(12), dp(10), dp(12), dp(10));
+        guide.setBackgroundColor(0xFFEFF6FF);
+        LinearLayout.LayoutParams guideLp = matchWrap();
+        guideLp.topMargin = dp(10);
+        root.addView(guide, guideLp);
 
         LinearLayout row1 = row();
         row1.addView(button("Accessibility", new View.OnClickListener() {

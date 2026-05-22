@@ -49,7 +49,9 @@ public class MacroOverlayService extends Service {
     private View controlsView;
     private WindowManager.LayoutParams controlsParams;
     private View recordLayer;
+    private LinearLayout controlsRoot;
     private TextView statusView;
+    private TextView hintView;
     private Button recordButton;
     private Button playButton;
     private final ArrayList<MacroEvent> recordingEvents = new ArrayList<>();
@@ -134,22 +136,31 @@ public class MacroOverlayService extends Service {
         }
 
         LinearLayout root = new LinearLayout(this);
+        controlsRoot = root;
         root.setOrientation(LinearLayout.HORIZONTAL);
         root.setGravity(Gravity.CENTER_VERTICAL);
-        root.setPadding(dp(8), dp(6), dp(8), dp(6));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(0xEE111827);
-        bg.setCornerRadius(dp(8));
-        bg.setStroke(dp(1), 0x6634A853);
-        root.setBackground(bg);
+        root.setPadding(dp(10), dp(8), dp(10), dp(8));
+        setPanelColor(0xEE14532D, 0xFF22C55E);
+
+        LinearLayout copy = new LinearLayout(this);
+        copy.setOrientation(LinearLayout.VERTICAL);
+        copy.setGravity(Gravity.CENTER_VERTICAL);
 
         statusView = new TextView(this);
         statusView.setTextColor(Color.WHITE);
-        statusView.setTextSize(12);
-        statusView.setMinWidth(dp(84));
-        statusView.setText("Ready");
+        statusView.setTextSize(14);
+        statusView.setText("READY");
+        statusView.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         statusView.setGravity(Gravity.CENTER_VERTICAL);
-        root.addView(statusView, new LinearLayout.LayoutParams(dp(112), dp(42)));
+        copy.addView(statusView, new LinearLayout.LayoutParams(dp(154), dp(22)));
+
+        hintView = new TextView(this);
+        hintView.setTextColor(0xFFE5E7EB);
+        hintView.setTextSize(11);
+        hintView.setText("A rekam | P play");
+        hintView.setGravity(Gravity.CENTER_VERTICAL);
+        copy.addView(hintView, new LinearLayout.LayoutParams(dp(154), dp(20)));
+        root.addView(copy, new LinearLayout.LayoutParams(dp(160), dp(48)));
 
         recordButton = makeButton("A", 0xFF34A853);
         playButton = makeButton("P", 0xFF0B57D0);
@@ -168,7 +179,7 @@ public class MacroOverlayService extends Service {
                 togglePlayback();
             }
         });
-        statusView.setOnTouchListener(new View.OnTouchListener() {
+        copy.setOnTouchListener(new View.OnTouchListener() {
             @Override
             public boolean onTouch(View v, MotionEvent event) {
                 return handleDrag(event);
@@ -178,7 +189,7 @@ public class MacroOverlayService extends Service {
         controlsParams = overlayParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT);
         controlsParams.gravity = Gravity.TOP | Gravity.RIGHT;
         controlsParams.x = dp(12);
-        controlsParams.y = dp(120);
+        controlsParams.y = dp(92);
         controlsView = root;
         try {
             windowManager.addView(controlsView, controlsParams);
@@ -271,7 +282,7 @@ public class MacroOverlayService extends Service {
             }
         }
         recordLayer = new View(this);
-        recordLayer.setBackgroundColor(Color.TRANSPARENT);
+        recordLayer.setBackgroundColor(0x110F172A);
         recordLayer.setOnTouchListener(new View.OnTouchListener() {
             @Override
             public boolean onTouch(View v, MotionEvent event) {
@@ -550,7 +561,8 @@ public class MacroOverlayService extends Service {
         main.post(new Runnable() {
             @Override
             public void run() {
-                if (statusView != null) statusView.setText(shortText(value, 18));
+                if (statusView != null) statusView.setText(shortText(value, 20));
+                if (hintView != null) hintView.setText(currentHint());
                 NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
                 if (nm != null) nm.notify(NOTIFICATION_ID, buildNotification(value));
             }
@@ -558,8 +570,64 @@ public class MacroOverlayService extends Service {
     }
 
     private void updateButtons() {
-        if (recordButton != null) recordButton.setText(recording ? "A*" : "A");
-        if (playButton != null) playButton.setText(playing ? "P*" : "P");
+        if (recording) {
+            setPanelColor(0xEEFEE2E2, 0xFFDC2626);
+            if (statusView != null) {
+                statusView.setTextColor(0xFF7F1D1D);
+                statusView.setText("REC " + recordingEvents.size());
+            }
+            if (hintView != null) {
+                hintView.setTextColor(0xFF7F1D1D);
+                hintView.setText("Tap target, A stop");
+            }
+            setButtonStyle(recordButton, "STOP", 0xFFDC2626);
+            setButtonStyle(playButton, "P", 0xFF9CA3AF);
+        } else if (playing) {
+            setPanelColor(0xEEDBEAFE, 0xFF2563EB);
+            if (statusView != null) {
+                statusView.setTextColor(0xFF1E3A8A);
+                statusView.setText("PLAY");
+            }
+            if (hintView != null) {
+                hintView.setTextColor(0xFF1E3A8A);
+                hintView.setText("P stop playback");
+            }
+            setButtonStyle(recordButton, "A", 0xFF9CA3AF);
+            setButtonStyle(playButton, "STOP", 0xFF2563EB);
+        } else {
+            setPanelColor(0xEE14532D, 0xFF22C55E);
+            if (statusView != null) statusView.setTextColor(Color.WHITE);
+            if (hintView != null) {
+                hintView.setTextColor(0xFFE5E7EB);
+                hintView.setText(currentHint());
+            }
+            setButtonStyle(recordButton, "A", 0xFF34A853);
+            setButtonStyle(playButton, "P", 0xFF0B57D0);
+        }
+    }
+
+    private String currentHint() {
+        if (recording) return "Tap target, A stop";
+        if (playing) return "P stop playback";
+        return "A rekam | P play";
+    }
+
+    private void setPanelColor(int fill, int stroke) {
+        if (controlsRoot == null) return;
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(fill);
+        bg.setCornerRadius(dp(10));
+        bg.setStroke(dp(2), stroke);
+        controlsRoot.setBackground(bg);
+    }
+
+    private void setButtonStyle(Button button, String text, int color) {
+        if (button == null) return;
+        button.setText(text);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(color);
+        bg.setCornerRadius(dp(8));
+        button.setBackground(bg);
     }
 
     private Notification buildNotification(String text) {
