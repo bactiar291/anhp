@@ -340,15 +340,32 @@ public class MacroOverlayService extends Service {
         return true;
     }
 
-    private void forwardLiveGesture(MacroEvent macroEvent) {
-        if (!AnHpAccessibilityService.dispatchMacroGesture(macroEvent, new AnHpAccessibilityService.GestureDone() {
+    private void forwardLiveGesture(final MacroEvent macroEvent) {
+        removeRecordLayer();
+        main.postDelayed(new Runnable() {
             @Override
-            public void onDone(boolean ok) {
-                if (!ok) setStatus("Gesture blocked");
+            public void run() {
+                if (!recording) return;
+                boolean accepted = AnHpAccessibilityService.dispatchMacroGesture(macroEvent, new AnHpAccessibilityService.GestureDone() {
+                    @Override
+                    public void onDone(boolean ok) {
+                        if (!ok && recording) setStatus("Gesture blocked");
+                        main.postDelayed(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (recording && recordLayer == null) addRecordLayer();
+                                updateButtons();
+                            }
+                        }, 80);
+                    }
+                });
+                if (!accepted) {
+                    setStatus("Gesture not accepted");
+                    if (recording && recordLayer == null) addRecordLayer();
+                    updateButtons();
+                }
             }
-        })) {
-            setStatus("Gesture not accepted");
-        }
+        }, 55);
     }
 
     private void togglePlayback() {
