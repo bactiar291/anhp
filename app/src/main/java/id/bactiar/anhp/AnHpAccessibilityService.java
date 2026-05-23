@@ -77,7 +77,7 @@ public class AnHpAccessibilityService extends AccessibilityService {
     protected boolean onKeyEvent(KeyEvent event) {
         if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
         int code = event.getKeyCode();
-        if (code != KeyEvent.KEYCODE_A && code != KeyEvent.KEYCODE_P) return false;
+        if (code != KeyEvent.KEYCODE_A && code != KeyEvent.KEYCODE_P && code != KeyEvent.KEYCODE_L) return false;
         long now = SystemClock.uptimeMillis();
         if (now - lastKeyMs < 350) return true;
         lastKeyMs = now;
@@ -85,7 +85,9 @@ public class AnHpAccessibilityService extends AccessibilityService {
                 this,
                 code == KeyEvent.KEYCODE_A
                         ? MacroOverlayService.ACTION_TOGGLE_RECORD
-                        : MacroOverlayService.ACTION_TOGGLE_PLAY);
+                        : code == KeyEvent.KEYCODE_P
+                        ? MacroOverlayService.ACTION_TOGGLE_PLAY
+                        : MacroOverlayService.ACTION_TOGGLE_LOOP);
         return true;
     }
 
@@ -95,4 +97,3 @@ public class AnHpAccessibilityService extends AccessibilityService {
         super.onDestroy();
     }
 }
-

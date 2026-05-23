@@ -34,9 +34,8 @@ public class MacroOverlayService extends Service {
     static final String ACTION_SHOW_CONTROLS = "id.bactiar.anhp.SHOW_CONTROLS";
     static final String ACTION_TOGGLE_RECORD = "id.bactiar.anhp.TOGGLE_RECORD";
     static final String ACTION_TOGGLE_PLAY = "id.bactiar.anhp.TOGGLE_PLAY";
-    static final String ACTION_START_CAPTURE = "id.bactiar.anhp.START_CAPTURE";
-    static final String EXTRA_RESULT_CODE = "result_code";
-    static final String EXTRA_CAPTURE_DATA = "capture_data";
+    static final String ACTION_TOGGLE_LOOP = "id.bactiar.anhp.TOGGLE_LOOP";
+    static final String ACTION_LOAD_SAVED = "id.bactiar.anhp.LOAD_SAVED";
 
     private static final String CHANNEL_ID = "anhp";
     private static final int NOTIFICATION_ID = 291;
@@ -45,7 +44,6 @@ public class MacroOverlayService extends Service {
     private HandlerThread workerThread;
     private Handler worker;
     private WindowManager windowManager;
-    private ScreenCapture screenCapture;
     private View controlsView;
     private WindowManager.LayoutParams controlsParams;
     private View recordLayer;
@@ -54,7 +52,10 @@ public class MacroOverlayService extends Service {
     private TextView hintView;
     private Button recordButton;
     private Button playButton;
+    private Button loopButton;
     private final ArrayList<MacroEvent> recordingEvents = new ArrayList<>();
+    private final ArrayList<MacroEvent> activeMacro = new ArrayList<>();
+    private boolean hasActiveMacro;
     private boolean recording;
     private volatile boolean playing;
     private volatile boolean cancelRequested;
@@ -81,7 +82,6 @@ public class MacroOverlayService extends Service {
     public void onCreate() {
         super.onCreate();
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
-        screenCapture = new ScreenCapture(this);
         workerThread = new HandlerThread("anhp-worker");
         workerThread.start();
         worker = new Handler(workerThread.getLooper());
@@ -101,10 +101,10 @@ public class MacroOverlayService extends Service {
             toggleRecording();
         } else if (ACTION_TOGGLE_PLAY.equals(action)) {
             togglePlayback();
-        } else if (ACTION_START_CAPTURE.equals(action)) {
-            int resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0);
-            Intent data = intent.getParcelableExtra(EXTRA_CAPTURE_DATA);
-            startScreenCapture(resultCode, data);
+        } else if (ACTION_TOGGLE_LOOP.equals(action)) {
+            toggleLoop();
+        } else if (ACTION_LOAD_SAVED.equals(action)) {
+            loadSavedMacro();
         }
         return START_STICKY;
     }
@@ -119,7 +119,6 @@ public class MacroOverlayService extends Service {
         cancelRequested = true;
         removeRecordLayer();
         removeControls();
-        if (screenCapture != null) screenCapture.stop();
         if (workerThread != null) workerThread.quitSafely();
         super.onDestroy();
     }
@@ -140,7 +139,7 @@ public class MacroOverlayService extends Service {
         root.setOrientation(LinearLayout.HORIZONTAL);
         root.setGravity(Gravity.CENTER_VERTICAL);
         root.setPadding(dp(10), dp(8), dp(10), dp(8));
-        setPanelColor(0xEE14532D, 0xFF22C55E);
+        setPanelColor(0xEE0F172A, 0xFF22C55E);
 
         LinearLayout copy = new LinearLayout(this);
         copy.setOrientation(LinearLayout.VERTICAL);
@@ -152,20 +151,22 @@ public class MacroOverlayService extends Service {
         statusView.setText("READY");
         statusView.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         statusView.setGravity(Gravity.CENTER_VERTICAL);
-        copy.addView(statusView, new LinearLayout.LayoutParams(dp(154), dp(22)));
+        copy.addView(statusView, new LinearLayout.LayoutParams(dp(150), dp(22)));
 
         hintView = new TextView(this);
         hintView.setTextColor(0xFFE5E7EB);
         hintView.setTextSize(11);
-        hintView.setText("A rekam | P play");
+        hintView.setText("A rec | P play | L loop");
         hintView.setGravity(Gravity.CENTER_VERTICAL);
-        copy.addView(hintView, new LinearLayout.LayoutParams(dp(154), dp(20)));
-        root.addView(copy, new LinearLayout.LayoutParams(dp(160), dp(48)));
+        copy.addView(hintView, new LinearLayout.LayoutParams(dp(150), dp(20)));
+        root.addView(copy, new LinearLayout.LayoutParams(dp(156), dp(48)));
 
-        recordButton = makeButton("A", 0xFF34A853);
-        playButton = makeButton("P", 0xFF0B57D0);
+        recordButton = makeButton("A", 0xFF16A34A);
+        playButton = makeButton("P", 0xFF2563EB);
+        loopButton = makeButton("L", 0xFF64748B);
         root.addView(recordButton);
         root.addView(playButton);
+        root.addView(loopButton);
 
         recordButton.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -177,6 +178,12 @@ public class MacroOverlayService extends Service {
             @Override
             public void onClick(View v) {
                 togglePlayback();
+            }
+        });
+        loopButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                toggleLoop();
             }
         });
         copy.setOnTouchListener(new View.OnTouchListener() {
@@ -204,13 +211,13 @@ public class MacroOverlayService extends Service {
         Button button = new Button(this);
         button.setText(text);
         button.setTextColor(Color.WHITE);
-        button.setTextSize(18);
+        button.setTextSize(16);
         button.setAllCaps(false);
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(color);
         bg.setCornerRadius(dp(7));
         button.setBackground(bg);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(48), dp(42));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(54), dp(42));
         lp.leftMargin = dp(6);
         button.setLayoutParams(lp);
         return button;
@@ -232,6 +239,28 @@ public class MacroOverlayService extends Service {
             return true;
         }
         return true;
+    }
+
+    private void toggleLoop() {
+        SettingsStore settings = new SettingsStore(this);
+        boolean next = !settings.isLoopPlay();
+        settings.setLoopPlay(next);
+        setStatus(next ? "Loop ON" : "Loop OFF");
+        updateButtons();
+    }
+
+    private void loadSavedMacro() {
+        ArrayList<MacroEvent> loaded = MacroStore.load(this);
+        if (loaded.isEmpty()) {
+            setStatus("No saved macro");
+            toast("Belum ada rekaman tersimpan.");
+            return;
+        }
+        activeMacro.clear();
+        activeMacro.addAll(loaded);
+        hasActiveMacro = true;
+        setStatus("Loaded " + activeMacro.size());
+        updateButtons();
     }
 
     private void toggleRecording() {
@@ -266,8 +295,23 @@ public class MacroOverlayService extends Service {
     private void stopRecording() {
         recording = false;
         removeRecordLayer();
-        boolean saved = MacroStore.save(this, recordingEvents);
-        setStatus(saved ? "Saved " + recordingEvents.size() : "Save failed");
+        if (recordingEvents.isEmpty()) {
+            setStatus("No action recorded");
+            updateButtons();
+            return;
+        }
+
+        activeMacro.clear();
+        activeMacro.addAll(recordingEvents);
+        hasActiveMacro = true;
+
+        SettingsStore settings = new SettingsStore(this);
+        if (settings.isSaveRecording()) {
+            boolean saved = MacroStore.save(this, recordingEvents);
+            setStatus(saved ? "Saved " + recordingEvents.size() : "Save failed");
+        } else {
+            setStatus("Temp " + recordingEvents.size());
+        }
         updateButtons();
     }
 
@@ -376,10 +420,12 @@ public class MacroOverlayService extends Service {
             updateButtons();
             return;
         }
-        final ArrayList<MacroEvent> macro = MacroStore.load(this);
+
+        final SettingsStore settings = new SettingsStore(this);
+        final ArrayList<MacroEvent> macro = getMacroForPlayback(settings);
         if (macro.isEmpty()) {
-            setStatus("No macro");
-            toast("Record first with A");
+            setStatus(settings.isAutoLoadSaved() ? "No macro" : "Load saved first");
+            toast(settings.isAutoLoadSaved() ? "Record first with A." : "Tekan Load Saved atau rekam dengan A.");
             return;
         }
         if (!AnHpAccessibilityService.isReady()) {
@@ -389,15 +435,13 @@ public class MacroOverlayService extends Service {
         }
         playing = true;
         cancelRequested = false;
-        setStatus("PLAY");
+        setStatus(settings.isLoopPlay() ? "LOOP" : "PLAY");
         updateButtons();
         worker.post(new Runnable() {
             @Override
             public void run() {
                 try {
-                    SettingsStore settings = new SettingsStore(MacroOverlayService.this);
-                    if (settings.isAiMode()) runAiLoop(macro, settings);
-                    else runPlainPlayback(macro, settings);
+                    runStaticPlayback(macro, settings);
                 } catch (Exception e) {
                     Logx.e("playback failed", e);
                     setStatus("Error: " + shortMsg(e));
@@ -416,47 +460,33 @@ public class MacroOverlayService extends Service {
         });
     }
 
-    private void runPlainPlayback(ArrayList<MacroEvent> macro, SettingsStore settings) throws Exception {
-        int loops = settings.isLoopPlay() ? settings.getMaxLoops() : 1;
-        for (int i = 1; i <= loops && !cancelRequested; i++) {
-            setStatus("PLAY " + i + "/" + loops);
-            if (!playMacroOnce(macro, settings.getSpeed())) return;
+    private ArrayList<MacroEvent> getMacroForPlayback(SettingsStore settings) {
+        if (hasActiveMacro && !activeMacro.isEmpty()) return new ArrayList<>(activeMacro);
+        if (!settings.isAutoLoadSaved()) return new ArrayList<>();
+        ArrayList<MacroEvent> loaded = MacroStore.load(this);
+        if (!loaded.isEmpty()) {
+            activeMacro.clear();
+            activeMacro.addAll(loaded);
+            hasActiveMacro = true;
         }
-        if (!cancelRequested) setStatus("Done");
+        return loaded;
     }
 
-    private void runAiLoop(ArrayList<MacroEvent> macro, SettingsStore settings) throws Exception {
-        int consecutiveStop = 0;
-        int maxLoops = settings.getMaxLoops();
-        boolean requireTwo = settings.isConfirmStopTwice();
-        for (int loop = 1; loop <= maxLoops && !cancelRequested; loop++) {
-            setStatus("AI play " + loop);
-            if (!playMacroOnce(macro, settings.getSpeed())) return;
-            if (!sleepCancelable(settings.getCheckDelaySeconds() * 1000L)) return;
-            if (!screenCapture.isReady()) {
-                setStatus("Start capture first");
-                return;
-            }
-            setStatus("AI capture");
-            String base64 = screenCapture.captureJpegBase64(1280, 72);
-            if (cancelRequested) return;
-            setStatus("AI Groq");
-            GroqClient.Decision decision = GroqClient.checkStopCondition(this, settings, base64, loop);
-            String type = decision.stopType == null ? "" : decision.stopType;
-            setStatus("AI " + (decision.stop ? "stop" : "go") + " " + type);
-            if (decision.stop) {
-                consecutiveStop++;
-                boolean terminal = "terminal_error".equalsIgnoreCase(type);
-                if (terminal || !requireTwo || consecutiveStop >= 2) {
-                    setStatus("AI stopped: " + shortText(decision.reason, 36));
-                    return;
-                }
-                setStatus("AI confirm once");
+    private void runStaticPlayback(ArrayList<MacroEvent> macro, SettingsStore settings) throws Exception {
+        boolean loop = settings.isLoopPlay();
+        int maxLoops = loop ? settings.getMaxLoops() : 1;
+        int count = 0;
+        while (!cancelRequested && (!loop || maxLoops == 0 || count < maxLoops)) {
+            count++;
+            if (loop) {
+                setStatus(maxLoops == 0 ? "LOOP " + count : "LOOP " + count + "/" + maxLoops);
             } else {
-                consecutiveStop = 0;
+                setStatus("PLAY");
             }
+            if (!playMacroOnce(macro, settings.getSpeed())) return;
+            if (!loop) break;
         }
-        if (!cancelRequested) setStatus("Loop limit");
+        if (!cancelRequested) setStatus(loop ? "Loop done" : "Done");
     }
 
     private boolean playMacroOnce(ArrayList<MacroEvent> macro, float speed) throws Exception {
@@ -504,29 +534,6 @@ public class MacroOverlayService extends Service {
         return Math.max(8, Math.min(120000, Math.round(delayMs / safeSpeed)));
     }
 
-    private void startScreenCapture(int resultCode, Intent data) {
-        if (data == null || resultCode == 0) {
-            setStatus("Capture denied");
-            return;
-        }
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(
-                        NOTIFICATION_ID,
-                        buildNotification("Screen capture active"),
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-                                | ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
-            } else {
-                startForeground(NOTIFICATION_ID, buildNotification("Screen capture active"));
-            }
-            screenCapture.start(resultCode, data);
-            setStatus("Capture ready");
-        } catch (Exception e) {
-            Logx.e("screen capture start failed", e);
-            setStatus("Capture error");
-        }
-    }
-
     private void startForegroundReady(String text) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
@@ -539,7 +546,7 @@ public class MacroOverlayService extends Service {
     }
 
     private WindowManager.LayoutParams overlayParams(int width, int height) {
-        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+        return new WindowManager.LayoutParams(
                 width,
                 height,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -547,7 +554,6 @@ public class MacroOverlayService extends Service {
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
                         | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT);
-        return params;
     }
 
     private boolean canDrawOverlay() {
@@ -587,6 +593,8 @@ public class MacroOverlayService extends Service {
     }
 
     private void updateButtons() {
+        SettingsStore settings = new SettingsStore(this);
+        boolean loop = settings.isLoopPlay();
         if (recording) {
             setPanelColor(0xEEFEE2E2, 0xFFDC2626);
             if (statusView != null) {
@@ -598,35 +606,42 @@ public class MacroOverlayService extends Service {
                 hintView.setText("Tap target, A stop");
             }
             setButtonStyle(recordButton, "STOP", 0xFFDC2626);
-            setButtonStyle(playButton, "P", 0xFF9CA3AF);
+            setButtonStyle(playButton, "P", 0xFF94A3B8);
+            setButtonStyle(loopButton, loop ? "L ON" : "L", loop ? 0xFFF59E0B : 0xFF64748B);
         } else if (playing) {
             setPanelColor(0xEEDBEAFE, 0xFF2563EB);
             if (statusView != null) {
                 statusView.setTextColor(0xFF1E3A8A);
-                statusView.setText("PLAY");
+                statusView.setText(loop ? "LOOP" : "PLAY");
             }
             if (hintView != null) {
                 hintView.setTextColor(0xFF1E3A8A);
                 hintView.setText("P stop playback");
             }
-            setButtonStyle(recordButton, "A", 0xFF9CA3AF);
+            setButtonStyle(recordButton, "A", 0xFF94A3B8);
             setButtonStyle(playButton, "STOP", 0xFF2563EB);
+            setButtonStyle(loopButton, loop ? "L ON" : "L", loop ? 0xFFF59E0B : 0xFF64748B);
         } else {
-            setPanelColor(0xEE14532D, 0xFF22C55E);
-            if (statusView != null) statusView.setTextColor(Color.WHITE);
-            if (hintView != null) {
-                hintView.setTextColor(0xFFE5E7EB);
-                hintView.setText(currentHint());
+            if (loop) {
+                setPanelColor(0xEEFDE68A, 0xFFF59E0B);
+                if (statusView != null) statusView.setTextColor(0xFF713F12);
+                if (hintView != null) hintView.setTextColor(0xFF713F12);
+            } else {
+                setPanelColor(0xEE0F172A, 0xFF22C55E);
+                if (statusView != null) statusView.setTextColor(Color.WHITE);
+                if (hintView != null) hintView.setTextColor(0xFFE5E7EB);
             }
-            setButtonStyle(recordButton, "A", 0xFF34A853);
-            setButtonStyle(playButton, "P", 0xFF0B57D0);
+            if (hintView != null) hintView.setText(currentHint());
+            setButtonStyle(recordButton, "A", 0xFF16A34A);
+            setButtonStyle(playButton, "P", 0xFF2563EB);
+            setButtonStyle(loopButton, loop ? "L ON" : "L", loop ? 0xFFF59E0B : 0xFF64748B);
         }
     }
 
     private String currentHint() {
         if (recording) return "Tap target, A stop";
         if (playing) return "P stop playback";
-        return "A rekam | P play";
+        return new SettingsStore(this).isLoopPlay() ? "Loop ON | P play" : "Loop OFF | L toggle";
     }
 
     private void setPanelColor(int fill, int stroke) {

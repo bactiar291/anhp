@@ -1,6 +1,5 @@
 <resources>
     <string name="app_name">AnHP</string>
     <string name="accessibility_label">AnHP Control</string>
-    <string name="accessibility_description">Record and replay tap or swipe macros with A and P controls.</string>
+    <string name="accessibility_description">Record, replay, and loop tap or swipe macros with A, P, and L controls.</string>
 </resources>
-

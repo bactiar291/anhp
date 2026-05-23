@@ -2,11 +2,11 @@ package id.bactiar.anhp;
 
 import android.Manifest;
 import android.app.Activity;
-import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
-import android.media.projection.MediaProjectionManager;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -23,26 +23,23 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 public class MainActivity extends Activity {
-    private static final int REQ_CAPTURE = 501;
     private static final int REQ_NOTIFY = 502;
 
     private SettingsStore settings;
+    private UiColors colors;
     private TextView status;
-    private EditText apiKeyInput;
-    private EditText conditionInput;
-    private EditText modelsInput;
     private EditText speedInput;
     private EditText maxLoopsInput;
-    private EditText delayInput;
-    private CheckBox aiModeInput;
     private CheckBox loopPlayInput;
-    private CheckBox confirmTwiceInput;
-    private CheckBox autoModelsInput;
+    private CheckBox saveRecordingInput;
+    private CheckBox autoLoadInput;
+    private CheckBox darkThemeInput;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         settings = new SettingsStore(this);
+        colors = UiColors.from(settings.isDarkTheme());
         requestNotificationPermission();
         buildUi();
         loadSettingsIntoUi();
@@ -56,217 +53,178 @@ public class MainActivity extends Activity {
         if (canDrawOverlay()) MacroOverlayService.startAction(this, MacroOverlayService.ACTION_SHOW_CONTROLS);
     }
 
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQ_CAPTURE) {
-            if (resultCode == RESULT_OK && data != null) {
-                Intent intent = new Intent(this, MacroOverlayService.class);
-                intent.setAction(MacroOverlayService.ACTION_START_CAPTURE);
-                intent.putExtra(MacroOverlayService.EXTRA_RESULT_CODE, resultCode);
-                intent.putExtra(MacroOverlayService.EXTRA_CAPTURE_DATA, data);
-                startServiceCompat(intent);
-                setStatus("Screen capture izin OK. Floating P bisa AI loop.");
-            } else {
-                setStatus("Screen capture dibatalkan.");
-            }
-        }
-    }
-
     private void buildUi() {
         ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(colors.background);
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(16), dp(18), dp(24));
+        root.setPadding(dp(18), dp(18), dp(18), dp(24));
         scroll.addView(root);
         setContentView(scroll);
 
         TextView title = new TextView(this);
-        title.setText("AnHP");
+        title.setText("AnHP Macro Replay");
         title.setTextSize(26);
-        title.setTextColor(0xFF111827);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(colors.text);
         title.setGravity(Gravity.LEFT);
         root.addView(title, matchWrap());
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("A = record/stop. P = play/stop. Groq AI mode checks screen after each loop.");
-        subtitle.setTextColor(0xFF374151);
+        subtitle.setText("Rekam tap/swipe sekali, lalu replay manual atau loop statis offline.");
+        subtitle.setTextColor(colors.muted);
         subtitle.setTextSize(14);
         root.addView(subtitle, matchWrap());
 
         status = new TextView(this);
         status.setTextColor(Color.WHITE);
         status.setTextSize(13);
-        status.setPadding(dp(10), dp(8), dp(10), dp(8));
-        status.setBackgroundColor(0xFF111827);
+        status.setPadding(dp(12), dp(9), dp(12), dp(9));
+        status.setBackground(rounded(colors.status, colors.accent, 8, 1));
         LinearLayout.LayoutParams statusLp = matchWrap();
-        statusLp.topMargin = dp(12);
+        statusLp.topMargin = dp(14);
         root.addView(status, statusLp);
 
-        TextView guide = new TextView(this);
-        guide.setText(
+        TextView guide = panelText(
                 "Cara cepat:\n" +
-                "1. Izinkan Accessibility + Overlay.\n" +
-                "2. Tekan Show A/P sampai panel mengambang muncul.\n" +
-                "3. Tekan A: mulai rekam. Panel jadi merah.\n" +
-                "4. Tap/swipe target seperti biasa. Tap dikirim ke app bawah.\n" +
-                "5. Tekan STOP/A: simpan rekaman.\n" +
-                "6. Tekan P: replay. Panel jadi biru. Tekan STOP/P untuk berhenti.");
-        guide.setTextColor(0xFF111827);
-        guide.setTextSize(14);
-        guide.setPadding(dp(12), dp(10), dp(12), dp(10));
-        guide.setBackgroundColor(0xFFEFF6FF);
+                "1. Aktifkan Accessibility dan Overlay.\n" +
+                "2. Tekan Show Panel sampai tombol mengambang muncul.\n" +
+                "3. Tekan A untuk rekam, tap/swipe target, lalu A lagi untuk stop.\n" +
+                "4. Tekan P untuk replay. Tekan L untuk loop ON/OFF.\n" +
+                "5. Simpan rekaman boleh dimatikan; kalau dimatikan, replay hanya berlaku selama app masih hidup.");
         LinearLayout.LayoutParams guideLp = matchWrap();
-        guideLp.topMargin = dp(10);
+        guideLp.topMargin = dp(12);
         root.addView(guide, guideLp);
 
-        LinearLayout row1 = row();
-        row1.addView(button("Accessibility", new View.OnClickListener() {
+        root.addView(sectionTitle("Izin wajib"));
+        LinearLayout permissionRow = row();
+        permissionRow.addView(button("Accessibility", colors.primary, new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
             }
         }));
-        row1.addView(button("Overlay", new View.OnClickListener() {
+        permissionRow.addView(button("Overlay", colors.secondary, new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 openOverlaySettings();
             }
         }));
-        root.addView(row1);
+        root.addView(permissionRow);
 
-        LinearLayout row2 = row();
-        row2.addView(button("Screen Capture", new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                saveSettings();
-                MediaProjectionManager manager =
-                        (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
-                if (manager != null) startActivityForResult(manager.createScreenCaptureIntent(), REQ_CAPTURE);
-            }
-        }));
-        row2.addView(button("Show A/P", new View.OnClickListener() {
+        root.addView(sectionTitle("Kontrol"));
+        LinearLayout controlRow = row();
+        controlRow.addView(button("Show Panel", colors.primary, new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 MacroOverlayService.startAction(MainActivity.this, MacroOverlayService.ACTION_SHOW_CONTROLS);
             }
         }));
-        root.addView(row2);
-
-        LinearLayout row3 = row();
-        row3.addView(button("A Record", new View.OnClickListener() {
+        controlRow.addView(button("Load Saved", colors.secondary, new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                saveSettings();
+                MacroOverlayService.startAction(MainActivity.this, MacroOverlayService.ACTION_LOAD_SAVED);
+                setStatus("Minta load rekaman tersimpan.");
+            }
+        }));
+        root.addView(controlRow);
+
+        LinearLayout actionRow = row();
+        actionRow.addView(button("A Record", colors.good, new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                saveSettings(false);
                 MacroOverlayService.startAction(MainActivity.this, MacroOverlayService.ACTION_TOGGLE_RECORD);
             }
         }));
-        row3.addView(button("P Play", new View.OnClickListener() {
+        actionRow.addView(button("P Play", colors.primary, new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                saveSettings();
+                saveSettings(false);
                 MacroOverlayService.startAction(MainActivity.this, MacroOverlayService.ACTION_TOGGLE_PLAY);
             }
         }));
-        root.addView(row3);
+        root.addView(actionRow);
 
-        root.addView(label("Groq API key"));
-        apiKeyInput = edit(false, 1);
-        apiKeyInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        root.addView(apiKeyInput, matchWrap());
-
-        LinearLayout row4 = row();
-        row4.addView(button("Save Settings", new View.OnClickListener() {
+        LinearLayout loopRow = row();
+        loopRow.addView(button("L Loop", colors.warn, new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                saveSettings();
+                loopPlayInput.setChecked(!loopPlayInput.isChecked());
+                saveSettings(false);
+                setStatus(loopPlayInput.isChecked() ? "Loop ON" : "Loop OFF");
             }
         }));
-        row4.addView(button("Clear Key", new View.OnClickListener() {
+        loopRow.addView(button("Save Settings", colors.secondary, new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                clearKey();
+                saveSettings(true);
             }
         }));
-        root.addView(row4);
+        root.addView(loopRow);
 
-        root.addView(label("Stop condition"));
-        conditionInput = edit(true, 4);
-        root.addView(conditionInput, matchWrap());
-
-        root.addView(label("Groq models"));
-        modelsInput = edit(true, 3);
-        root.addView(modelsInput, matchWrap());
-
-        aiModeInput = check("AI mode on P", true);
-        autoModelsInput = check("Auto fetch Groq models", true);
-        loopPlayInput = check("Loop play without AI", false);
-        confirmTwiceInput = check("Confirm AI stop twice", true);
-        root.addView(aiModeInput);
-        root.addView(autoModelsInput);
+        root.addView(sectionTitle("Mode replay"));
+        loopPlayInput = check("Loop replay (L): ulang sampai limit atau STOP", false);
+        saveRecordingInput = check("Simpan rekaman setelah stop A", true);
+        autoLoadInput = check("Auto load rekaman tersimpan saat P ditekan", true);
+        darkThemeInput = check("Dark theme", colors.dark);
+        darkThemeInput.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                settings.setDarkTheme(darkThemeInput.isChecked());
+                saveSettings(false);
+                recreate();
+            }
+        });
         root.addView(loopPlayInput);
-        root.addView(confirmTwiceInput);
+        root.addView(saveRecordingInput);
+        root.addView(autoLoadInput);
+        root.addView(darkThemeInput);
 
         LinearLayout numbers = row();
-        speedInput = numberEdit("1.0");
-        maxLoopsInput = numberEdit("20");
-        delayInput = numberEdit("2");
-        numbers.addView(fieldBox("Speed", speedInput));
-        numbers.addView(fieldBox("Max loops", maxLoopsInput));
-        numbers.addView(fieldBox("AI delay s", delayInput));
+        speedInput = numberEdit("1.0", true);
+        maxLoopsInput = numberEdit("20", false);
+        numbers.addView(fieldBox("Speed", "0.2 - 5.0", speedInput));
+        numbers.addView(fieldBox("Max loops", "0 = terus", maxLoopsInput));
         root.addView(numbers);
     }
 
     private void loadSettingsIntoUi() {
-        apiKeyInput.setText(SecurePrefs.loadGroqKey(this));
-        conditionInput.setText(settings.getCondition());
-        modelsInput.setText(settings.getModelsText());
-        aiModeInput.setChecked(settings.isAiMode());
-        autoModelsInput.setChecked(settings.isAutoFetchModels());
         loopPlayInput.setChecked(settings.isLoopPlay());
-        confirmTwiceInput.setChecked(settings.isConfirmStopTwice());
+        saveRecordingInput.setChecked(settings.isSaveRecording());
+        autoLoadInput.setChecked(settings.isAutoLoadSaved());
+        darkThemeInput.setChecked(settings.isDarkTheme());
         speedInput.setText(String.valueOf(settings.getSpeed()));
         maxLoopsInput.setText(String.valueOf(settings.getMaxLoops()));
-        delayInput.setText(String.valueOf(settings.getCheckDelaySeconds()));
         refreshStatus();
     }
 
-    private void saveSettings() {
+    private void saveSettings(boolean toast) {
         try {
-            settings.setCondition(conditionInput.getText().toString());
-            settings.setModelsText(modelsInput.getText().toString());
-            settings.setAiMode(aiModeInput.isChecked());
-            settings.setAutoFetchModels(autoModelsInput.isChecked());
             settings.setLoopPlay(loopPlayInput.isChecked());
-            settings.setConfirmStopTwice(confirmTwiceInput.isChecked());
+            settings.setSaveRecording(saveRecordingInput.isChecked());
+            settings.setAutoLoadSaved(autoLoadInput.isChecked());
+            settings.setDarkTheme(darkThemeInput.isChecked());
             settings.setSpeed(parseFloat(speedInput.getText().toString(), 1.0f));
             settings.setMaxLoops(parseInt(maxLoopsInput.getText().toString(), 20));
-            settings.setCheckDelaySeconds(parseInt(delayInput.getText().toString(), 2));
-            String key = apiKeyInput.getText().toString().trim();
-            if (key.length() > 0) SecurePrefs.saveGroqKey(this, key);
-            setStatus("Saved. Macro events: " + MacroStore.count(this));
+            setStatus("Saved | macro tersimpan " + MacroStore.count(this));
             MacroOverlayService.startAction(this, MacroOverlayService.ACTION_SHOW_CONTROLS);
+            if (toast) showToast("Setting tersimpan.");
         } catch (Exception e) {
             Logx.e("save settings failed", e);
-            setStatus("Save failed: " + e.getMessage());
-        }
-    }
-
-    private void clearKey() {
-        try {
-            SecurePrefs.saveGroqKey(this, "");
-            apiKeyInput.setText("");
-            setStatus("Groq key cleared.");
-        } catch (Exception e) {
-            setStatus("Clear failed: " + e.getMessage());
+            setStatus("Save failed: " + shortMsg(e));
+            if (toast) showToast("Save failed: " + shortMsg(e));
         }
     }
 
     private void refreshStatus() {
-        String key = SecurePrefs.loadGroqKey(this).length() > 0 ? "key OK" : "no key";
         String overlay = canDrawOverlay() ? "overlay OK" : "overlay OFF";
         String access = AnHpAccessibilityService.isReady() ? "access OK" : "access OFF";
-        setStatus(access + " | " + overlay + " | " + key + " | macro " + MacroStore.count(this));
+        String loop = settings.isLoopPlay() ? "loop ON" : "loop OFF";
+        String save = settings.isSaveRecording() ? "save ON" : "save OFF";
+        setStatus(access + " | " + overlay + " | " + loop + " | " + save + " | macro " + MacroStore.count(this));
     }
 
     private void openOverlaySettings() {
@@ -289,14 +247,35 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void startServiceCompat(Intent intent) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent);
-        else startService(intent);
-    }
-
     private void setStatus(String text) {
         if (status != null) status.setText(text);
+    }
+
+    private void showToast(String text) {
         Toast.makeText(this, text, Toast.LENGTH_SHORT).show();
+    }
+
+    private TextView sectionTitle(String text) {
+        TextView title = new TextView(this);
+        title.setText(text);
+        title.setTextColor(colors.text);
+        title.setTextSize(15);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        LinearLayout.LayoutParams lp = matchWrap();
+        lp.topMargin = dp(18);
+        title.setLayoutParams(lp);
+        return title;
+    }
+
+    private TextView panelText(String text) {
+        TextView view = new TextView(this);
+        view.setText(text);
+        view.setTextColor(colors.text);
+        view.setTextSize(14);
+        view.setLineSpacing(0, 1.08f);
+        view.setPadding(dp(12), dp(11), dp(12), dp(11));
+        view.setBackground(rounded(colors.surface, colors.border, 8, 1));
+        return view;
     }
 
     private LinearLayout row() {
@@ -309,65 +288,55 @@ public class MainActivity extends Activity {
         return row;
     }
 
-    private TextView label(String text) {
-        TextView label = new TextView(this);
-        label.setText(text);
-        label.setTextColor(0xFF111827);
-        label.setTextSize(13);
-        LinearLayout.LayoutParams lp = matchWrap();
-        lp.topMargin = dp(14);
-        label.setLayoutParams(lp);
-        return label;
-    }
-
-    private Button button(String text, View.OnClickListener listener) {
+    private Button button(String text, int color, View.OnClickListener listener) {
         Button button = new Button(this);
         button.setText(text);
+        button.setTextColor(Color.WHITE);
         button.setTextSize(13);
         button.setAllCaps(false);
         button.setOnClickListener(listener);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(44), 1);
+        button.setBackground(rounded(color, darker(color), 7, 1));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(46), 1);
         lp.rightMargin = dp(8);
         button.setLayoutParams(lp);
         return button;
     }
 
-    private EditText edit(boolean multiline, int minLines) {
+    private EditText numberEdit(String value, boolean decimal) {
         EditText edit = new EditText(this);
-        edit.setTextSize(14);
-        edit.setSingleLine(!multiline);
-        edit.setMinLines(minLines);
-        edit.setGravity(Gravity.TOP | Gravity.LEFT);
-        edit.setInputType(multiline
-                ? InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
-                : InputType.TYPE_CLASS_TEXT);
-        return edit;
-    }
-
-    private EditText numberEdit(String value) {
-        EditText edit = edit(false, 1);
         edit.setText(value);
-        edit.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        edit.setTextColor(colors.text);
+        edit.setHintTextColor(colors.muted);
+        edit.setTextSize(14);
+        edit.setSingleLine(true);
+        edit.setPadding(dp(10), 0, dp(10), 0);
+        edit.setInputType(decimal
+                ? InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL
+                : InputType.TYPE_CLASS_NUMBER);
+        edit.setBackground(rounded(colors.input, colors.border, 7, 1));
         return edit;
     }
 
     private CheckBox check(String text, boolean checked) {
         CheckBox box = new CheckBox(this);
         box.setText(text);
+        box.setTextColor(colors.text);
         box.setTextSize(14);
         box.setChecked(checked);
         return box;
     }
 
-    private LinearLayout fieldBox(String label, EditText edit) {
+    private LinearLayout fieldBox(String label, String hint, EditText edit) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         TextView tv = new TextView(this);
-        tv.setText(label);
+        tv.setText(label + " (" + hint + ")");
         tv.setTextSize(12);
-        tv.setTextColor(0xFF374151);
+        tv.setTextColor(colors.muted);
         box.addView(tv);
-        box.addView(edit, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
+        LinearLayout.LayoutParams editLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
+        editLp.topMargin = dp(4);
+        box.addView(edit, editLp);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
         lp.rightMargin = dp(8);
         box.setLayoutParams(lp);
@@ -378,8 +347,23 @@ public class MainActivity extends Activity {
         return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
     }
 
+    private GradientDrawable rounded(int fill, int stroke, int radiusDp, int strokeDp) {
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(fill);
+        bg.setCornerRadius(dp(radiusDp));
+        bg.setStroke(dp(strokeDp), stroke);
+        return bg;
+    }
+
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private static int darker(int color) {
+        int r = Math.max(0, Math.round(Color.red(color) * 0.78f));
+        int g = Math.max(0, Math.round(Color.green(color) * 0.78f));
+        int b = Math.max(0, Math.round(Color.blue(color) * 0.78f));
+        return Color.rgb(r, g, b);
     }
 
     private static int parseInt(String value, int fallback) {
@@ -395,6 +379,90 @@ public class MainActivity extends Activity {
             return Float.parseFloat(value.trim());
         } catch (Exception ignored) {
             return fallback;
+        }
+    }
+
+    private static String shortMsg(Exception e) {
+        String msg = e.getMessage();
+        if (msg == null || msg.length() == 0) msg = e.getClass().getSimpleName();
+        return msg.length() <= 60 ? msg : msg.substring(0, 57) + "...";
+    }
+
+    private static final class UiColors {
+        final boolean dark;
+        final int background;
+        final int surface;
+        final int input;
+        final int text;
+        final int muted;
+        final int border;
+        final int status;
+        final int primary;
+        final int secondary;
+        final int good;
+        final int warn;
+        final int accent;
+
+        private UiColors(
+                boolean dark,
+                int background,
+                int surface,
+                int input,
+                int text,
+                int muted,
+                int border,
+                int status,
+                int primary,
+                int secondary,
+                int good,
+                int warn,
+                int accent) {
+            this.dark = dark;
+            this.background = background;
+            this.surface = surface;
+            this.input = input;
+            this.text = text;
+            this.muted = muted;
+            this.border = border;
+            this.status = status;
+            this.primary = primary;
+            this.secondary = secondary;
+            this.good = good;
+            this.warn = warn;
+            this.accent = accent;
+        }
+
+        static UiColors from(boolean dark) {
+            if (dark) {
+                return new UiColors(
+                        true,
+                        0xFF0B1220,
+                        0xFF111827,
+                        0xFF182235,
+                        0xFFF8FAFC,
+                        0xFFCBD5E1,
+                        0xFF334155,
+                        0xFF020617,
+                        0xFF2563EB,
+                        0xFF7C3AED,
+                        0xFF059669,
+                        0xFFD97706,
+                        0xFF22D3EE);
+            }
+            return new UiColors(
+                    false,
+                    0xFFF8FAFC,
+                    0xFFFFFFFF,
+                    0xFFFFFFFF,
+                    0xFF0F172A,
+                    0xFF475569,
+                    0xFFE2E8F0,
+                    0xFF111827,
+                    0xFF2563EB,
+                    0xFF7C3AED,
+                    0xFF16A34A,
+                    0xFFF59E0B,
+                    0xFF06B6D4);
         }
     }
 }
