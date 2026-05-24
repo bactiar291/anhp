@@ -126,7 +126,6 @@ public class MacroOverlayService extends Service {
     @Override
     public void onTaskRemoved(Intent rootIntent) {
         showControls();
-        super.onTaskRemoved(rootIntent);
     }
 
     private void showControls() {

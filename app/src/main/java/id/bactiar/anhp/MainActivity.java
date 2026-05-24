@@ -53,6 +53,24 @@ public class MainActivity extends Activity {
         if (canDrawOverlay()) MacroOverlayService.startAction(this, MacroOverlayService.ACTION_SHOW_CONTROLS);
     }
 
+    @Override
+    protected void onPause() {
+        if (canDrawOverlay()) MacroOverlayService.startAction(this, MacroOverlayService.ACTION_SHOW_CONTROLS);
+        super.onPause();
+    }
+
+    @Override
+    protected void onStop() {
+        if (canDrawOverlay()) MacroOverlayService.startAction(this, MacroOverlayService.ACTION_SHOW_CONTROLS);
+        super.onStop();
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (canDrawOverlay()) MacroOverlayService.startAction(this, MacroOverlayService.ACTION_SHOW_CONTROLS);
+        moveTaskToBack(true);
+    }
+
     private void buildUi() {
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
