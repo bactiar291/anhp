@@ -71,10 +71,14 @@ public class MacroOverlayService extends Service {
     static void startAction(Context context, String action) {
         Intent intent = new Intent(context, MacroOverlayService.class);
         intent.setAction(action);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(intent);
-        } else {
-            context.startService(intent);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent);
+            } else {
+                context.startService(intent);
+            }
+        } catch (Exception e) {
+            Logx.e("start overlay service failed", e);
         }
     }
 
