@@ -123,6 +123,12 @@ public class MacroOverlayService extends Service {
         super.onDestroy();
     }
 
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        showControls();
+        super.onTaskRemoved(rootIntent);
+    }
+
     private void showControls() {
         if (!canDrawOverlay()) {
             setStatus("Overlay permission needed");
@@ -130,6 +136,7 @@ public class MacroOverlayService extends Service {
             return;
         }
         if (controlsView != null) {
+            ensureControlsAttached();
             updateButtons();
             return;
         }
@@ -198,11 +205,9 @@ public class MacroOverlayService extends Service {
         controlsParams.x = dp(12);
         controlsParams.y = dp(92);
         controlsView = root;
-        try {
-            windowManager.addView(controlsView, controlsParams);
-        } catch (Exception e) {
-            Logx.e("show controls failed", e);
+        if (!ensureControlsAttached()) {
             controlsView = null;
+            controlsParams = null;
         }
         updateButtons();
     }
@@ -317,9 +322,9 @@ public class MacroOverlayService extends Service {
 
     private void addRecordLayer() {
         removeRecordLayer();
-        View oldControls = controlsView;
-        WindowManager.LayoutParams oldParams = controlsParams;
-        if (oldControls != null) {
+        final View oldControls = controlsView;
+        final WindowManager.LayoutParams oldParams = controlsParams;
+        if (oldControls != null && oldControls.getParent() != null) {
             try {
                 windowManager.removeView(oldControls);
             } catch (Exception ignored) {
@@ -340,17 +345,14 @@ public class MacroOverlayService extends Service {
         params.format = PixelFormat.TRANSLUCENT;
         try {
             windowManager.addView(recordLayer, params);
-            if (oldControls != null) windowManager.addView(oldControls, oldParams);
+            if (oldControls != null && oldParams != null) {
+                windowManager.addView(oldControls, oldParams);
+            }
         } catch (Exception e) {
             Logx.e("record layer failed", e);
-            recordLayer = null;
+            removeRecordLayer();
             recording = false;
-            if (oldControls != null && oldControls.getParent() == null) {
-                try {
-                    windowManager.addView(oldControls, oldParams);
-                } catch (Exception ignored) {
-                }
-            }
+            ensureControlsAttached();
             setStatus("Record layer failed");
         }
     }
@@ -577,6 +579,18 @@ public class MacroOverlayService extends Service {
             } catch (Exception ignored) {
             }
             controlsView = null;
+        }
+    }
+
+    private boolean ensureControlsAttached() {
+        if (controlsView == null || controlsParams == null) return false;
+        if (controlsView.getParent() != null) return true;
+        try {
+            windowManager.addView(controlsView, controlsParams);
+            return true;
+        } catch (Exception e) {
+            Logx.e("attach controls failed", e);
+            return false;
         }
     }
 
