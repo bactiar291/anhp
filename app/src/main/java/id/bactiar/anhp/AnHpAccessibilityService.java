@@ -15,8 +15,13 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityWindowInfo;
 import android.widget.Button;
 import android.widget.LinearLayout;
+
+import java.util.List;
+import java.util.Locale;
 
 public class AnHpAccessibilityService extends AccessibilityService {
     interface GestureDone {
@@ -45,6 +50,52 @@ public class AnHpAccessibilityService extends AccessibilityService {
 
     static boolean isReady() {
         return instance != null;
+    }
+
+    static String findScreenKeyword(String[] keywords) {
+        final AnHpAccessibilityService service = instance;
+        if (service == null) return null;
+        try {
+            AccessibilityNodeInfo root = service.getRootInActiveWindow();
+            String match = findKeywordInNode(root, keywords);
+            if (match != null) return match;
+            List<AccessibilityWindowInfo> windows = service.getWindows();
+            if (windows == null) return null;
+            for (AccessibilityWindowInfo window : windows) {
+                if (window == null) continue;
+                match = findKeywordInNode(window.getRoot(), keywords);
+                if (match != null) return match;
+            }
+        } catch (Exception e) {
+            Logx.e("screen keyword scan failed", e);
+        }
+        return null;
+    }
+
+    private static String findKeywordInNode(AccessibilityNodeInfo node, String[] keywords) {
+        if (node == null) return null;
+        try {
+            String match = findKeywordInText(node.getText(), keywords);
+            if (match != null) return match;
+            match = findKeywordInText(node.getContentDescription(), keywords);
+            if (match != null) return match;
+            for (int i = 0; i < node.getChildCount(); i++) {
+                match = findKeywordInNode(node.getChild(i), keywords);
+                if (match != null) return match;
+            }
+        } finally {
+            node.recycle();
+        }
+        return null;
+    }
+
+    private static String findKeywordInText(CharSequence value, String[] keywords) {
+        if (value == null) return null;
+        String text = value.toString().toLowerCase(Locale.US);
+        for (String keyword : keywords) {
+            if (text.contains(keyword)) return keyword;
+        }
+        return null;
     }
 
     static boolean dispatchMacroGesture(final MacroEvent event, final GestureDone done) {

@@ -21,26 +21,44 @@ final class MacroStore {
     private MacroStore() {
     }
 
-    static ArrayList<MacroEvent> load(Context context) {
-        ArrayList<MacroEvent> events = new ArrayList<>();
+    static final class MacroData {
+        final ArrayList<MacroEvent> events = new ArrayList<>();
+        int loopDelayMs;
+
+        boolean isEmpty() {
+            return events.isEmpty();
+        }
+    }
+
+    static MacroData loadData(Context context) {
+        MacroData data = new MacroData();
         File file = new File(context.getFilesDir(), FILE_NAME);
-        if (!file.exists()) return events;
+        if (!file.exists()) return data;
         try {
             String text = readAll(file);
             JSONObject root = new JSONObject(text);
+            data.loopDelayMs = Math.max(0, Math.min(120000, root.optInt("loop_delay_ms", 250)));
             JSONArray arr = root.optJSONArray("events");
-            if (arr == null) return events;
+            if (arr == null) return data;
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject obj = arr.optJSONObject(i);
-                if (obj != null) events.add(MacroEvent.fromJson(obj));
+                if (obj != null) data.events.add(MacroEvent.fromJson(obj));
             }
         } catch (Exception e) {
             Logx.e("Macro load failed", e);
         }
-        return events;
+        return data;
+    }
+
+    static ArrayList<MacroEvent> load(Context context) {
+        return loadData(context).events;
     }
 
     static boolean save(Context context, List<MacroEvent> events) {
+        return save(context, events, 250);
+    }
+
+    static boolean save(Context context, List<MacroEvent> events, int loopDelayMs) {
         File dir = context.getFilesDir();
         File tmp = new File(dir, FILE_NAME + ".tmp");
         File dst = new File(dir, FILE_NAME);
@@ -48,8 +66,9 @@ final class MacroStore {
             JSONArray arr = new JSONArray();
             for (MacroEvent event : events) arr.put(event.toJson());
             JSONObject root = new JSONObject();
-            root.put("version", 1);
+            root.put("version", 2);
             root.put("created_utc", String.valueOf(System.currentTimeMillis()));
+            root.put("loop_delay_ms", Math.max(0, Math.min(120000, loopDelayMs)));
             root.put("events", arr);
             OutputStreamWriter writer = new OutputStreamWriter(new FileOutputStream(tmp), StandardCharsets.UTF_8);
             try {
@@ -82,4 +101,3 @@ final class MacroStore {
         return sb.toString();
     }
 }
-

@@ -55,10 +55,17 @@ public class MacroOverlayService extends Service {
     private Button loopButton;
     private final ArrayList<MacroEvent> recordingEvents = new ArrayList<>();
     private final ArrayList<MacroEvent> activeMacro = new ArrayList<>();
+    private static final String[] BLOCKING_KEYWORDS = new String[]{
+            "repair", "top up", "topup", "recharge", "refill", "empty", "habis",
+            "beliung habis", "pickaxe broken", "tool broken", "durability low",
+            "insufficient", "not enough", "no energy", "out of energy", "stamina empty"
+    };
     private boolean hasActiveMacro;
+    private int activeLoopDelayMs = 250;
     private boolean recording;
     private volatile boolean playing;
     private volatile boolean cancelRequested;
+    private long recordingStartedAt;
     private long lastRecordedAt;
     private float downX;
     private float downY;
@@ -258,14 +265,15 @@ public class MacroOverlayService extends Service {
     }
 
     private void loadSavedMacro() {
-        ArrayList<MacroEvent> loaded = MacroStore.load(this);
-        if (loaded.isEmpty()) {
+        MacroStore.MacroData loaded = MacroStore.loadData(this);
+        if (loaded.events.isEmpty()) {
             setStatus("No saved macro");
             toast("Belum ada rekaman tersimpan.");
             return;
         }
         activeMacro.clear();
-        activeMacro.addAll(loaded);
+        activeMacro.addAll(loaded.events);
+        activeLoopDelayMs = loaded.loopDelayMs;
         hasActiveMacro = true;
         setStatus("Loaded " + activeMacro.size());
         updateButtons();
@@ -293,6 +301,8 @@ public class MacroOverlayService extends Service {
         }
         showControls();
         recordingEvents.clear();
+        activeLoopDelayMs = 250;
+        recordingStartedAt = SystemClock.uptimeMillis();
         lastRecordedAt = 0;
         recording = true;
         addRecordLayer();
@@ -302,6 +312,7 @@ public class MacroOverlayService extends Service {
 
     private void stopRecording() {
         recording = false;
+        long stoppedAt = SystemClock.uptimeMillis();
         removeRecordLayer();
         if (recordingEvents.isEmpty()) {
             setStatus("No action recorded");
@@ -311,11 +322,12 @@ public class MacroOverlayService extends Service {
 
         activeMacro.clear();
         activeMacro.addAll(recordingEvents);
+        activeLoopDelayMs = (int) Math.min(120000, Math.max(0, stoppedAt - lastRecordedAt));
         hasActiveMacro = true;
 
         SettingsStore settings = new SettingsStore(this);
         if (settings.isSaveRecording()) {
-            boolean saved = MacroStore.save(this, recordingEvents);
+            boolean saved = MacroStore.save(this, recordingEvents, activeLoopDelayMs);
             setStatus(saved ? "Saved " + recordingEvents.size() : "Save failed");
         } else {
             setStatus("Temp " + recordingEvents.size());
@@ -371,7 +383,9 @@ public class MacroOverlayService extends Service {
         }
         if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
             long now = SystemClock.uptimeMillis();
-            int delay = lastRecordedAt == 0 ? 120 : (int) Math.min(120000, Math.max(0, downTime - lastRecordedAt));
+            int delay = lastRecordedAt == 0
+                    ? (int) Math.min(120000, Math.max(60, downTime - recordingStartedAt))
+                    : (int) Math.min(120000, Math.max(0, downTime - lastRecordedAt));
             int duration = (int) Math.min(30000, Math.max(45, now - downTime));
             MacroEvent macroEvent = new MacroEvent(
                     delay,
@@ -427,7 +441,7 @@ public class MacroOverlayService extends Service {
         }
 
         final SettingsStore settings = new SettingsStore(this);
-        final ArrayList<MacroEvent> macro = getMacroForPlayback(settings);
+        final MacroStore.MacroData macro = getMacroForPlayback(settings);
         if (macro.isEmpty()) {
             setStatus(settings.isAutoLoadSaved() ? "No macro" : "Load saved first");
             toast(settings.isAutoLoadSaved() ? "Record first with A." : "Tekan Load Saved atau rekam dengan A.");
@@ -465,31 +479,44 @@ public class MacroOverlayService extends Service {
         });
     }
 
-    private ArrayList<MacroEvent> getMacroForPlayback(SettingsStore settings) {
-        if (hasActiveMacro && !activeMacro.isEmpty()) return new ArrayList<>(activeMacro);
-        if (!settings.isAutoLoadSaved()) return new ArrayList<>();
-        ArrayList<MacroEvent> loaded = MacroStore.load(this);
-        if (!loaded.isEmpty()) {
+    private MacroStore.MacroData getMacroForPlayback(SettingsStore settings) {
+        MacroStore.MacroData data = new MacroStore.MacroData();
+        if (hasActiveMacro && !activeMacro.isEmpty()) {
+            data.events.addAll(activeMacro);
+            data.loopDelayMs = activeLoopDelayMs;
+            return data;
+        }
+        if (!settings.isAutoLoadSaved()) return data;
+        MacroStore.MacroData loaded = MacroStore.loadData(this);
+        if (!loaded.events.isEmpty()) {
             activeMacro.clear();
-            activeMacro.addAll(loaded);
+            activeMacro.addAll(loaded.events);
+            activeLoopDelayMs = loaded.loopDelayMs;
             hasActiveMacro = true;
         }
         return loaded;
     }
 
-    private void runStaticPlayback(ArrayList<MacroEvent> macro, SettingsStore settings) throws Exception {
+    private void runStaticPlayback(MacroStore.MacroData macro, SettingsStore settings) throws Exception {
         boolean loop = settings.isLoopPlay();
         int maxLoops = loop ? settings.getMaxLoops() : 1;
         int count = 0;
         while (!cancelRequested && (!loop || maxLoops == 0 || count < maxLoops)) {
+            String blocker = findBlockingKeyword();
+            if (blocker != null) {
+                setStatus("Stop: " + blocker);
+                toast("Loop dihentikan: " + blocker);
+                return;
+            }
             count++;
             if (loop) {
                 setStatus(maxLoops == 0 ? "LOOP " + count : "LOOP " + count + "/" + maxLoops);
             } else {
                 setStatus("PLAY");
             }
-            if (!playMacroOnce(macro, settings.getSpeed())) return;
+            if (!playMacroOnce(macro.events, settings.getSpeed())) return;
             if (!loop) break;
+            if (!sleepCancelable(adjustDelay(macro.loopDelayMs, settings.getSpeed()))) return;
         }
         if (!cancelRequested) setStatus(loop ? "Loop done" : "Done");
     }
@@ -497,6 +524,12 @@ public class MacroOverlayService extends Service {
     private boolean playMacroOnce(ArrayList<MacroEvent> macro, float speed) throws Exception {
         long nextStartAt = SystemClock.uptimeMillis();
         for (MacroEvent event : macro) {
+            String blocker = findBlockingKeyword();
+            if (blocker != null) {
+                setStatus("Stop: " + blocker);
+                toast("Loop dihentikan: " + blocker);
+                return false;
+            }
             MacroEvent adjusted = adjustEvent(event, speed);
             nextStartAt += adjustDelay(event.delayMs, speed);
             if (!sleepUntilCancelable(nextStartAt)) return false;
@@ -537,6 +570,10 @@ public class MacroOverlayService extends Service {
         return !cancelRequested;
     }
 
+    private boolean sleepCancelable(long ms) throws InterruptedException {
+        return sleepUntilCancelable(SystemClock.uptimeMillis() + Math.max(0, ms));
+    }
+
     private int adjustDelay(int delayMs, float speed) {
         float safeSpeed = Math.max(0.2f, Math.min(5f, speed));
         return Math.max(8, Math.min(120000, Math.round(delayMs / safeSpeed)));
@@ -553,6 +590,10 @@ public class MacroOverlayService extends Service {
                 event.endX,
                 event.endY,
                 duration);
+    }
+
+    private String findBlockingKeyword() {
+        return AnHpAccessibilityService.findScreenKeyword(BLOCKING_KEYWORDS);
     }
 
     private void startForegroundReady(String text) {
