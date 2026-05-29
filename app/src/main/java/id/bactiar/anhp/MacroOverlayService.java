@@ -55,11 +55,6 @@ public class MacroOverlayService extends Service {
     private Button loopButton;
     private final ArrayList<MacroEvent> recordingEvents = new ArrayList<>();
     private final ArrayList<MacroEvent> activeMacro = new ArrayList<>();
-    private static final String[] BLOCKING_KEYWORDS = new String[]{
-            "repair", "top up", "topup", "recharge", "refill", "empty", "habis",
-            "beliung habis", "pickaxe broken", "tool broken", "durability low",
-            "insufficient", "not enough", "no energy", "out of energy", "stamina empty"
-    };
     private boolean hasActiveMacro;
     private int activeLoopDelayMs = 250;
     private boolean recording;
@@ -413,22 +408,20 @@ public class MacroOverlayService extends Service {
                     @Override
                     public void onDone(boolean ok) {
                         if (!ok && recording) setStatus("Gesture blocked");
-                        main.postDelayed(new Runnable() {
-                            @Override
-                            public void run() {
-                                if (recording && recordLayer == null) addRecordLayer();
-                                updateButtons();
-                            }
-                        }, 80);
                     }
                 });
                 if (!accepted) {
                     setStatus("Gesture not accepted");
-                    if (recording && recordLayer == null) addRecordLayer();
-                    updateButtons();
                 }
+                main.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (recording && recordLayer == null) addRecordLayer();
+                        updateButtons();
+                    }
+                }, 35);
             }
-        }, 55);
+        }, 20);
     }
 
     private void togglePlayback() {
@@ -502,12 +495,6 @@ public class MacroOverlayService extends Service {
         int maxLoops = loop ? settings.getMaxLoops() : 1;
         int count = 0;
         while (!cancelRequested && (!loop || maxLoops == 0 || count < maxLoops)) {
-            String blocker = findBlockingKeyword();
-            if (blocker != null) {
-                setStatus("Stop: " + blocker);
-                toast("Loop dihentikan: " + blocker);
-                return;
-            }
             count++;
             if (loop) {
                 setStatus(maxLoops == 0 ? "LOOP " + count : "LOOP " + count + "/" + maxLoops);
@@ -524,12 +511,6 @@ public class MacroOverlayService extends Service {
     private boolean playMacroOnce(ArrayList<MacroEvent> macro, float speed) throws Exception {
         long nextStartAt = SystemClock.uptimeMillis();
         for (MacroEvent event : macro) {
-            String blocker = findBlockingKeyword();
-            if (blocker != null) {
-                setStatus("Stop: " + blocker);
-                toast("Loop dihentikan: " + blocker);
-                return false;
-            }
             MacroEvent adjusted = adjustEvent(event, speed);
             nextStartAt += adjustDelay(event.delayMs, speed);
             if (!sleepUntilCancelable(nextStartAt)) return false;
@@ -590,10 +571,6 @@ public class MacroOverlayService extends Service {
                 event.endX,
                 event.endY,
                 duration);
-    }
-
-    private String findBlockingKeyword() {
-        return AnHpAccessibilityService.findScreenKeyword(BLOCKING_KEYWORDS);
     }
 
     private void startForegroundReady(String text) {
