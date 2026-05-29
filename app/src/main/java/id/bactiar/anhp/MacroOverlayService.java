@@ -371,7 +371,7 @@ public class MacroOverlayService extends Service {
         }
         if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
             long now = SystemClock.uptimeMillis();
-            int delay = lastRecordedAt == 0 ? 120 : (int) Math.min(120000, Math.max(0, now - lastRecordedAt));
+            int delay = lastRecordedAt == 0 ? 120 : (int) Math.min(120000, Math.max(0, downTime - lastRecordedAt));
             int duration = (int) Math.min(30000, Math.max(45, now - downTime));
             MacroEvent macroEvent = new MacroEvent(
                     delay,
@@ -495,12 +495,16 @@ public class MacroOverlayService extends Service {
     }
 
     private boolean playMacroOnce(ArrayList<MacroEvent> macro, float speed) throws Exception {
+        long nextStartAt = SystemClock.uptimeMillis();
         for (MacroEvent event : macro) {
-            if (!sleepCancelable(adjustDelay(event.delayMs, speed))) return false;
-            if (!dispatchSync(event)) {
+            MacroEvent adjusted = adjustEvent(event, speed);
+            nextStartAt += adjustDelay(event.delayMs, speed);
+            if (!sleepUntilCancelable(nextStartAt)) return false;
+            if (!dispatchSync(adjusted)) {
                 setStatus("Dispatch failed");
                 return false;
             }
+            nextStartAt += adjusted.durationMs;
         }
         return true;
     }
@@ -522,12 +526,11 @@ public class MacroOverlayService extends Service {
             }
         });
         long timeout = Math.max(1200, event.durationMs + 2200L);
-        latch.await(timeout, TimeUnit.MILLISECONDS);
+        if (!latch.await(timeout, TimeUnit.MILLISECONDS)) return false;
         return ok[0] && !cancelRequested;
     }
 
-    private boolean sleepCancelable(long ms) throws InterruptedException {
-        long until = SystemClock.uptimeMillis() + Math.max(0, ms);
+    private boolean sleepUntilCancelable(long until) throws InterruptedException {
         while (!cancelRequested && SystemClock.uptimeMillis() < until) {
             Thread.sleep(Math.min(80, Math.max(1, until - SystemClock.uptimeMillis())));
         }
@@ -537,6 +540,19 @@ public class MacroOverlayService extends Service {
     private int adjustDelay(int delayMs, float speed) {
         float safeSpeed = Math.max(0.2f, Math.min(5f, speed));
         return Math.max(8, Math.min(120000, Math.round(delayMs / safeSpeed)));
+    }
+
+    private MacroEvent adjustEvent(MacroEvent event, float speed) {
+        float safeSpeed = Math.max(0.2f, Math.min(5f, speed));
+        int minDuration = event.isSwipe() ? 80 : 45;
+        int duration = Math.max(minDuration, Math.min(30000, Math.round(event.durationMs / safeSpeed)));
+        return new MacroEvent(
+                0,
+                event.startX,
+                event.startY,
+                event.endX,
+                event.endY,
+                duration);
     }
 
     private void startForegroundReady(String text) {
