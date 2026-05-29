@@ -39,6 +39,9 @@ public class MacroOverlayService extends Service {
 
     private static final String CHANNEL_ID = "anhp";
     private static final int NOTIFICATION_ID = 291;
+    private static final int PLAY_CANCELLED = 0;
+    private static final int PLAY_DONE = 1;
+    private static final int PLAY_RESTART = 2;
 
     private final Handler main = new Handler();
     private HandlerThread workerThread;
@@ -501,26 +504,35 @@ public class MacroOverlayService extends Service {
             } else {
                 setStatus("PLAY");
             }
-            if (!playMacroOnce(macro.events, settings.getSpeed())) return;
+            int result = playMacroOnce(macro.events, settings.getSpeed(), loop);
+            if (result == PLAY_CANCELLED) return;
+            if (result == PLAY_RESTART) {
+                setStatus("RESET TO START");
+                if (!sleepCancelable(250)) return;
+                continue;
+            }
             if (!loop) break;
             if (!sleepCancelable(adjustDelay(macro.loopDelayMs, settings.getSpeed()))) return;
         }
         if (!cancelRequested) setStatus(loop ? "Loop done" : "Done");
     }
 
-    private boolean playMacroOnce(ArrayList<MacroEvent> macro, float speed) throws Exception {
+    private int playMacroOnce(ArrayList<MacroEvent> macro, float speed, boolean allowRestart) throws Exception {
         long nextStartAt = SystemClock.uptimeMillis();
-        for (MacroEvent event : macro) {
+        for (int i = 0; i < macro.size(); i++) {
+            if (allowRestart && i > 0 && shouldRestartFromBeginning()) return PLAY_RESTART;
+            MacroEvent event = macro.get(i);
             MacroEvent adjusted = adjustEvent(event, speed);
             nextStartAt += adjustDelay(event.delayMs, speed);
-            if (!sleepUntilCancelable(nextStartAt)) return false;
+            if (!sleepUntilCancelable(nextStartAt)) return PLAY_CANCELLED;
             if (!dispatchSync(adjusted)) {
                 setStatus("Dispatch failed");
-                return false;
+                return PLAY_CANCELLED;
             }
+            if (allowRestart && shouldRestartFromBeginning()) return PLAY_RESTART;
             nextStartAt += adjusted.durationMs;
         }
-        return true;
+        return PLAY_DONE;
     }
 
     private boolean dispatchSync(final MacroEvent event) throws Exception {
@@ -571,6 +583,16 @@ public class MacroOverlayService extends Service {
                 event.endX,
                 event.endY,
                 duration);
+    }
+
+    private boolean shouldRestartFromBeginning() {
+        String text = AnHpAccessibilityService.getVisibleTextLower();
+        if (text.length() == 0) return false;
+        if (text.contains("beliung habis")) return true;
+        if (text.contains("pickaxe broken") || text.contains("tool broken")) return true;
+        if (text.contains("no pickaxe") || text.contains("out of pickaxe")) return true;
+        if (text.contains("durability low") || text.contains("durability empty")) return true;
+        return text.contains("beliung") && text.contains("habis");
     }
 
     private void startForegroundReady(String text) {

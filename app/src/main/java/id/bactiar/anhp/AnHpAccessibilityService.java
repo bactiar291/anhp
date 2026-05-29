@@ -15,8 +15,13 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityWindowInfo;
 import android.widget.Button;
 import android.widget.LinearLayout;
+
+import java.util.List;
+import java.util.Locale;
 
 public class AnHpAccessibilityService extends AccessibilityService {
     interface GestureDone {
@@ -45,6 +50,42 @@ public class AnHpAccessibilityService extends AccessibilityService {
 
     static boolean isReady() {
         return instance != null;
+    }
+
+    static String getVisibleTextLower() {
+        final AnHpAccessibilityService service = instance;
+        if (service == null) return "";
+        StringBuilder out = new StringBuilder();
+        try {
+            appendNodeText(service.getRootInActiveWindow(), out);
+            List<AccessibilityWindowInfo> windows = service.getWindows();
+            if (windows != null) {
+                for (AccessibilityWindowInfo window : windows) {
+                    if (window != null) appendNodeText(window.getRoot(), out);
+                }
+            }
+        } catch (Exception e) {
+            Logx.e("screen text scan failed", e);
+        }
+        return out.toString().toLowerCase(Locale.US);
+    }
+
+    private static void appendNodeText(AccessibilityNodeInfo node, StringBuilder out) {
+        if (node == null) return;
+        try {
+            appendText(node.getText(), out);
+            appendText(node.getContentDescription(), out);
+            for (int i = 0; i < node.getChildCount(); i++) {
+                appendNodeText(node.getChild(i), out);
+            }
+        } finally {
+            node.recycle();
+        }
+    }
+
+    private static void appendText(CharSequence text, StringBuilder out) {
+        if (text == null || text.length() == 0) return;
+        out.append(' ').append(text);
     }
 
     static boolean dispatchMacroGesture(final MacroEvent event, final GestureDone done) {
